@@ -1,43 +1,201 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/TodoDB';
-import { format } from 'date-fns';
-import { Plus, Check, Trash2, Search, ListFilter } from 'lucide-react';
+import { format, isEqual, startOfDay } from 'date-fns';
+import { Plus, Check, Trash2, Search, ListFilter, GripVertical, Calendar, Edit2, X } from 'lucide-react';
 import { clsx } from 'clsx';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
-const ITEMS_PER_PAGE = 10;
+interface TodoItemProps {
+  todo: any;
+  toggleTodo: (id: number) => void;
+  deleteTodo: (id: number) => void;
+  updateTodo: (id: number, title: string) => void;
+}
+
+function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo }: TodoItemProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState(todo.title);
+  
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: todo.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editValue.trim() && todo.id) {
+      updateTodo(todo.id, editValue.trim());
+      setIsEditing(false);
+    }
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={clsx(
+        "flex items-center gap-3 bg-gray-800 p-4 rounded-lg transition-all hover:bg-gray-750",
+        todo.completed && "opacity-60"
+      )}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab text-gray-400 hover:text-gray-300"
+      >
+        <GripVertical className="w-5 h-5" />
+      </div>
+      
+      <button
+        onClick={() => todo.id && toggleTodo(todo.id)}
+        className={clsx(
+          "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors",
+          todo.completed ? "border-green-500 bg-green-500" : "border-gray-400"
+        )}
+      >
+        {todo.completed && <Check className="w-4 h-4 text-white" />}
+      </button>
+
+      {isEditing ? (
+        <form onSubmit={handleSubmit} className="flex-1">
+          <input
+            type="text"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            className="w-full bg-gray-700 text-white px-3 py-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+            autoFocus
+            onBlur={handleSubmit}
+          />
+        </form>
+      ) : (
+        <>
+          <span className={clsx(
+            "flex-1 text-white",
+            todo.completed && "line-through"
+          )}>
+            {todo.title}
+            {todo.dueDate && (
+              <span className="ml-2 text-sm text-gray-400">
+                ({format(todo.dueDate, 'MMM d, yyyy')})
+              </span>
+            )}
+          </span>
+          <button
+            onClick={() => setIsEditing(true)}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            <Edit2 className="w-5 h-5" />
+          </button>
+        </>
+      )}
+
+      <button
+        onClick={() => todo.id && deleteTodo(todo.id)}
+        className="text-red-400 hover:text-red-500 transition-colors"
+      >
+        <Trash2 className="w-5 h-5" />
+      </button>
+    </div>
+  );
+}
 
 export function TodoList() {
   const [newTodo, setNewTodo] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState<'all' | 'completed' | 'active'>('all');
+  const [dueDate, setDueDate] = useState<string>('');
+  const [filterDate, setFilterDate] = useState<string>('');
+  
+  const userId = localStorage.getItem('userName') || '';
 
-  const todos = useLiveQuery(async () => {
-    let collection = db.todos.orderBy('createdAt').reverse();
-    
-    if (activeTab === 'completed') {
-      collection = collection.filter(todo => todo.completed);
-    } else if (activeTab === 'active') {
-      collection = collection.filter(todo => !todo.completed);
-    }
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
-    const allTodos = await collection.toArray();
-    return allTodos.filter(todo => 
-      todo.title.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [searchQuery, activeTab]);
+  const todos = useLiveQuery(
+    async () => {
+      let collection = await db.todos
+        .where('userId')
+        .equals(userId)
+        .toArray();
+      
+      // Sort by order
+      collection = collection.sort((a, b) => a.order - b.order);
+      
+      // Filter based on activeTab
+      if (activeTab === 'completed') {
+        collection = collection.filter(todo => todo.completed);
+      } else if (activeTab === 'active') {
+        collection = collection.filter(todo => !todo.completed);
+      }
+
+      // Filter based on search query
+      collection = collection.filter(todo => 
+        todo.title.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+
+      // Filter based on selected date
+      if (filterDate) {
+        const selectedDate = startOfDay(new Date(filterDate));
+        collection = collection.filter(todo => {
+          const todoDate = todo.dueDate 
+            ? startOfDay(new Date(todo.dueDate))
+            : startOfDay(new Date(todo.createdAt));
+          return isEqual(todoDate, selectedDate);
+        });
+      }
+
+      return collection;
+    },
+    [searchQuery, activeTab, userId, filterDate]
+  );
 
   const addTodo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTodo.trim()) return;
 
+    const maxOrder = await db.todos.where('userId').equals(userId).reverse().first();
+    const nextOrder = maxOrder ? maxOrder.order + 1 : 0;
+
     await db.todos.add({
       title: newTodo.trim(),
       completed: false,
-      createdAt: new Date()
+      createdAt: new Date(),
+      dueDate: dueDate ? new Date(dueDate) : undefined,
+      order: nextOrder,
+      userId
     });
     setNewTodo('');
+    setDueDate('');
   };
 
   const toggleTodo = async (id: number) => {
@@ -47,10 +205,35 @@ export function TodoList() {
     }
   };
 
+  const updateTodo = async (id: number, title: string) => {
+    await db.todos.update(id, { title });
+  };
+
   const deleteTodo = async (id: number) => {
     await db.todos.delete(id);
   };
 
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    
+    if (over && active.id !== over.id) {
+      const oldIndex = todos?.findIndex(t => t.id === active.id);
+      const newIndex = todos?.findIndex(t => t.id === over.id);
+      
+      if (oldIndex !== undefined && newIndex !== undefined && todos) {
+        const newTodos = arrayMove(todos, oldIndex, newIndex);
+        
+        // Update orders in database
+        await Promise.all(
+          newTodos.map((todo, index) => 
+            db.todos.update(todo.id!, { order: index })
+          )
+        );
+      }
+    }
+  };
+
+  const ITEMS_PER_PAGE = 10;
   const totalPages = todos ? Math.ceil(todos.length / ITEMS_PER_PAGE) : 0;
   const paginatedTodos = todos?.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
@@ -58,7 +241,9 @@ export function TodoList() {
   );
 
   const groupedTodos = paginatedTodos?.reduce((groups, todo) => {
-    const date = format(todo.createdAt, 'yyyy-MM-dd');
+    const date = todo.dueDate 
+      ? format(todo.dueDate, 'yyyy-MM-dd')
+      : format(todo.createdAt, 'yyyy-MM-dd');
     if (!groups[date]) {
       groups[date] = [];
     }
@@ -68,7 +253,7 @@ export function TodoList() {
 
   return (
     <div className="bg-gradient-to-br from-gray-900 to-gray-800 p-8 rounded-2xl shadow-xl w-full max-w-2xl">
-      <form onSubmit={addTodo} className="mb-6">
+      <form onSubmit={addTodo} className="mb-6 space-y-4">
         <div className="flex gap-2">
           <input
             type="text"
@@ -84,6 +269,15 @@ export function TodoList() {
             <Plus className="w-5 h-5" />
             Add
           </button>
+        </div>
+        <div className="flex gap-2 items-center">
+          <Calendar className="w-5 h-5 text-gray-400" />
+          <input
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            className="bg-gray-700 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
         </div>
       </form>
 
@@ -129,51 +323,61 @@ export function TodoList() {
             </button>
           </div>
         </div>
+
+        <div className="flex gap-2 items-center">
+          <Calendar className="w-5 h-5 text-gray-400" />
+          <input
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+            className="bg-gray-700 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          {filterDate && (
+            <button
+              onClick={() => setFilterDate('')}
+              className="text-gray-400 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-6">
-        {groupedTodos && Object.entries(groupedTodos).map(([date, todosForDate]) => (
-          <div key={date} className="space-y-2">
-            <h3 className="text-lg font-semibold text-blue-400 mb-3 flex items-center gap-2">
-              <ListFilter className="w-5 h-5" />
-              {format(new Date(date), 'MMMM d, yyyy')}
-            </h3>
-            <div className="space-y-2">
-              {todosForDate?.map((todo) => (
-                <div
-                  key={todo.id}
-                  className={clsx(
-                    "flex items-center gap-3 bg-gray-800 p-4 rounded-lg transition-all hover:bg-gray-750",
-                    todo.completed && "opacity-60"
-                  )}
-                >
-                  <button
-                    onClick={() => todo.id && toggleTodo(todo.id)}
-                    className={clsx(
-                      "w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors",
-                      todo.completed ? "border-green-500 bg-green-500" : "border-gray-400"
-                    )}
-                  >
-                    {todo.completed && <Check className="w-4 h-4 text-white" />}
-                  </button>
-                  <span className={clsx(
-                    "flex-1 text-white",
-                    todo.completed && "line-through"
-                  )}>
-                    {todo.title}
-                  </span>
-                  <button
-                    onClick={() => todo.id && deleteTodo(todo.id)}
-                    className="text-red-400 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="space-y-6">
+          {groupedTodos && Object.entries(groupedTodos).map(([date, todosForDate]) => (
+            <div key={date} className="space-y-2">
+              <h3 className="text-lg font-semibold text-blue-400 mb-3 flex items-center gap-2">
+                <ListFilter className="w-5 h-5" />
+                {format(new Date(date), 'MMMM d, yyyy')}
+              </h3>
+              <SortableContext
+                items={todosForDate?.map(t => t.id!) || []}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-2">
+                  {todosForDate?.map((todo) => (
+                    <SortableTodoItem
+                      key={todo.id}
+                      todo={todo}
+                      toggleTodo={toggleTodo}
+                      deleteTodo={deleteTodo}
+                      updateTodo={updateTodo}
+                    />
+                  ))}
                 </div>
-              ))}
+              </SortableContext>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+          {(!groupedTodos || Object.keys(groupedTodos).length === 0) && (
+            <p className="text-gray-500 text-center py-4">No todos found</p>
+          )}
+        </div>
+      </DndContext>
 
       {totalPages > 1 && (
         <div className="mt-8 flex justify-center gap-2">

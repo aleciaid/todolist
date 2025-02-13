@@ -5,12 +5,16 @@ export interface Todo {
   title: string;
   completed: boolean;
   createdAt: Date;
+  dueDate?: Date;
+  order: number;
+  userId: string;
 }
 
 export interface TimerRecord {
   id?: number;
   duration: number;
   createdAt: Date;
+  userId: string;
 }
 
 export class TodoDB extends Dexie {
@@ -19,9 +23,9 @@ export class TodoDB extends Dexie {
 
   constructor() {
     super('TodoDB');
-    this.version(2).stores({
-      todos: '++id, title, completed, createdAt',
-      timerRecords: '++id, duration, createdAt'
+    this.version(3).stores({
+      todos: '++id, title, completed, createdAt, dueDate, order, userId',
+      timerRecords: '++id, duration, createdAt, userId'
     });
   }
 }

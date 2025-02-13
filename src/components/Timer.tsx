@@ -19,23 +19,38 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
   const summaryRef = useRef<HTMLDivElement>(null);
 
   const timerRecords = useLiveQuery(
-    () => db.timerRecords.orderBy('createdAt').reverse().toArray()
+    async () => {
+      const records = await db.timerRecords
+        .where('userId')
+        .equals(userName)
+        .toArray();
+      
+      // Sort records by createdAt in descending order
+      return records.sort((a, b) => 
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+    },
+    [userName]
   );
 
   const todaysTodos = useLiveQuery(
     () => db.todos
-      .where('createdAt')
-      .above(new Date(new Date().setHours(0, 0, 0, 0)))
+      .where('userId').equals(userName)
+      .filter(todo => {
+        const todoDate = new Date(todo.createdAt);
+        return todoDate > new Date(new Date().setHours(0, 0, 0, 0));
+      })
       .toArray()
   );
 
   const yesterdaysTodos = useLiveQuery(
     () => db.todos
-      .where('createdAt')
-      .between(
-        new Date(new Date().setHours(0, 0, 0, 0) - 86400000),
-        new Date(new Date().setHours(0, 0, 0, 0))
-      )
+      .where('userId').equals(userName)
+      .filter(todo => {
+        const todoDate = new Date(todo.createdAt);
+        return todoDate > new Date(new Date().setHours(0, 0, 0, 0) - 86400000) &&
+               todoDate < new Date(new Date().setHours(0, 0, 0, 0));
+      })
       .toArray()
   );
 
@@ -60,12 +75,13 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
     if (time > 0) {
       await db.timerRecords.add({
         duration: time,
-        createdAt: new Date()
+        createdAt: new Date(),
+        userId: userName
       });
     }
     setTime(0);
     setIsRunning(false);
-  }, [time]);
+  }, [time, userName]);
 
   const reset = useCallback(() => {
     setTime(0);
