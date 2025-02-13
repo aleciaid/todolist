@@ -15,17 +15,27 @@ export interface TimerRecord {
   duration: number;
   createdAt: Date;
   userId: string;
+  todoId?: number;
+  todoTitle?: string;
+}
+
+export interface ActiveTimer {
+  id?: number;
+  time: number;
+  todoTitle: string;
 }
 
 export class TodoDB extends Dexie {
   todos!: Table<Todo>;
   timerRecords!: Table<TimerRecord>;
+  activeTimer!: Table<ActiveTimer>;
 
   constructor() {
     super('TodoDB');
-    this.version(3).stores({
+    this.version(5).stores({
       todos: '++id, title, completed, createdAt, dueDate, order, userId',
-      timerRecords: '++id, duration, createdAt, userId'
+      timerRecords: '++id, duration, createdAt, userId, todoId, todoTitle',
+      activeTimer: '++id, time, todoTitle'
     });
   }
 }

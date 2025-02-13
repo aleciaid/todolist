@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/TodoDB';
 import { format, isEqual, startOfDay } from 'date-fns';
-import { Plus, Check, Trash2, Search, ListFilter, GripVertical, Calendar, Edit2, X } from 'lucide-react';
+import { Plus, Check, Trash2, Search, ListFilter, GripVertical, Calendar, Edit2, X, Play, StopCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 import {
   DndContext,
@@ -27,11 +27,14 @@ interface TodoItemProps {
   toggleTodo: (id: number) => void;
   deleteTodo: (id: number) => void;
   updateTodo: (id: number, title: string) => void;
+  isAnyTimerRunning: boolean;
 }
 
-function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo }: TodoItemProps) {
+function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo, isAnyTimerRunning }: TodoItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(todo.title);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [time, setTime] = useState(0);
   
   const {
     attributes,
@@ -52,6 +55,64 @@ function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo }: TodoItem
       updateTodo(todo.id, editValue.trim());
       setIsEditing(false);
     }
+  };
+
+  React.useEffect(() => {
+    let interval: number;
+    if (isTimerRunning) {
+      interval = setInterval(() => {
+        setTime(prevTime => {
+          const newTime = prevTime + 1;
+          // Update the active timer in the database
+          db.activeTimer.clear().then(() => {
+            db.activeTimer.add({
+              time: newTime,
+              todoTitle: todo.title
+            });
+          });
+          return newTime;
+        });
+      }, 1000);
+    }
+    return () => {
+      clearInterval(interval);
+      // Clear active timer when component unmounts or timer stops
+      if (!isTimerRunning) {
+        db.activeTimer.clear();
+      }
+    };
+  }, [isTimerRunning, todo.title]);
+
+  const startTimer = async () => {
+    // Check if any other timer is running
+    if (!isAnyTimerRunning && !todo.completed) {
+      setIsTimerRunning(true);
+    }
+  };
+
+  const stopTimer = async () => {
+    if (time > 0 && todo.id) {
+      await db.timerRecords.add({
+        duration: time,
+        createdAt: new Date(),
+        userId: todo.userId,
+        todoId: todo.id,
+        todoTitle: todo.title
+      });
+      setTime(0);
+      setIsTimerRunning(false);
+      // Clear active timer
+      await db.activeTimer.clear();
+    }
+  };
+
+  const formatTime = (timeInSeconds: number) => {
+    const hours = Math.floor(timeInSeconds / 3600);
+    const minutes = Math.floor((timeInSeconds % 3600) / 60);
+    const seconds = timeInSeconds % 60;
+    return `${hours.toString().padStart(2, '0')}:${minutes
+      .toString()
+      .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -104,6 +165,11 @@ function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo }: TodoItem
                 ({format(todo.dueDate, 'MMM d, yyyy')})
               </span>
             )}
+            {isTimerRunning && (
+              <span className="ml-2 text-sm text-blue-400 font-mono">
+                {formatTime(time)}
+              </span>
+            )}
           </span>
           <button
             onClick={() => setIsEditing(true)}
@@ -114,8 +180,42 @@ function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo }: TodoItem
         </>
       )}
 
+      {!todo.completed && (
+        isTimerRunning ? (
+          <button
+            onClick={stopTimer}
+            className="text-yellow-500 hover:text-yellow-600 transition-colors"
+          >
+            <StopCircle className="w-5 h-5" />
+          </button>
+        ) : (
+          <button
+            onClick={startTimer}
+            className={clsx(
+              "text-blue-400 transition-colors",
+              isAnyTimerRunning 
+                ? "opacity-50 cursor-not-allowed" 
+                : "hover:text-blue-500"
+            )}
+            disabled={isAnyTimerRunning}
+          >
+            <Play className="w-5 h-5" />
+          </button>
+        )
+      )}
+
       <button
-        onClick={() => todo.id && deleteTodo(todo.id)}
+        onClick={async () => {
+          if (todo.id) {
+            // Delete associated timer records first
+            await db.timerRecords
+              .where('todoId')
+              .equals(todo.id)
+              .delete();
+            // Then delete the todo
+            await deleteTodo(todo.id);
+          }
+        }}
         className="text-red-400 hover:text-red-500 transition-colors"
       >
         <Trash2 className="w-5 h-5" />
@@ -140,6 +240,13 @@ export function TodoList() {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+
+  // Check if any timer is currently running
+  const activeTimer = useLiveQuery(
+    () => db.activeTimer.toArray(),
+    []
+  );
+  const isAnyTimerRunning = activeTimer && activeTimer.length > 0;
 
   const todos = useLiveQuery(
     async () => {
@@ -367,6 +474,7 @@ export function TodoList() {
                       toggleTodo={toggleTodo}
                       deleteTodo={deleteTodo}
                       updateTodo={updateTodo}
+                      isAnyTimerRunning={isAnyTimerRunning}
                     />
                   ))}
                 </div>

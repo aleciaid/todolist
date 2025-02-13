@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Pause, RotateCcw, Timer as TimerIcon, History, X, CheckCircle, Clock, StopCircle, Calendar, Download } from 'lucide-react';
+import { Timer as TimerIcon, History, X, CheckCircle, Clock, Calendar, Download } from 'lucide-react';
 import { db } from '../db/TodoDB';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { format, subDays } from 'date-fns';
@@ -13,8 +13,6 @@ interface TimerProps {
 }
 
 export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerProps) {
-  const [time, setTime] = useState(0);
-  const [isRunning, setIsRunning] = useState(false);
   const [activeHistoryTab, setActiveHistoryTab] = useState<'today' | 'yesterday'>('today');
   const summaryRef = useRef<HTMLDivElement>(null);
 
@@ -32,6 +30,15 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
     },
     [userName]
   );
+
+  // Subscribe to active timer from any task
+  const activeTimer = useLiveQuery(
+    () => db.activeTimer.toArray(),
+    []
+  );
+
+  const currentTime = activeTimer?.[0]?.time || 0;
+  const currentTask = activeTimer?.[0]?.todoTitle || '';
 
   const todaysTodos = useLiveQuery(
     () => db.todos
@@ -71,23 +78,6 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
     return 'Selamat Malam';
   };
 
-  const stop = useCallback(async () => {
-    if (time > 0) {
-      await db.timerRecords.add({
-        duration: time,
-        createdAt: new Date(),
-        userId: userName
-      });
-    }
-    setTime(0);
-    setIsRunning(false);
-  }, [time, userName]);
-
-  const reset = useCallback(() => {
-    setTime(0);
-    setIsRunning(false);
-  }, []);
-
   const downloadSummary = useCallback(async () => {
     if (summaryRef.current) {
       try {
@@ -101,16 +91,6 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
       }
     }
   }, []);
-
-  useEffect(() => {
-    let interval: number;
-    if (isRunning) {
-      interval = setInterval(() => {
-        setTime(prevTime => prevTime + 1);
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isRunning]);
 
   const filterRecordsByDate = (records: any[] | undefined, date: Date) => {
     return records?.filter(record => {
@@ -144,35 +124,15 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
             </div>
             <p className="text-blue-400">{getGreeting()}, {userName}!</p>
           </div>
-          
-          <div className="text-6xl font-mono text-center mb-8 text-blue-400">
-            {formatTime(time)}
-          </div>
 
-          <div className="flex justify-center gap-4">
-            <button
-              onClick={() => setIsRunning(!isRunning)}
-              className="flex items-center justify-center w-12 h-12 rounded-full bg-blue-500 hover:bg-blue-600 transition-colors"
-            >
-              {isRunning ? (
-                <Pause className="w-6 h-6 text-white" />
-              ) : (
-                <Play className="w-6 h-6 text-white" />
-              )}
-            </button>
-            <button
-              onClick={stop}
-              className="flex items-center justify-center w-12 h-12 rounded-full bg-yellow-500 hover:bg-yellow-600 transition-colors"
-            >
-              <StopCircle className="w-6 h-6 text-white" />
-            </button>
-            <button
-              onClick={reset}
-              className="flex items-center justify-center w-12 h-12 rounded-full bg-red-500 hover:bg-red-600 transition-colors"
-            >
-              <RotateCcw className="w-6 h-6 text-white" />
-            </button>
+          <div className="text-6xl font-mono text-center mb-4 text-blue-400">
+            {formatTime(currentTime)}
           </div>
+          {currentTask && (
+            <p className="text-center text-gray-400">
+              Current Task: {currentTask}
+            </p>
+          )}
         </div>
 
         <div className="bg-gradient-to-br from-gray-900 to-gray-800 p-6 rounded-2xl shadow-xl mt-6">
@@ -213,11 +173,18 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
           </div>
 
           <div className="space-y-2 max-h-[200px] overflow-y-auto">
-            {(activeHistoryTab === 'today' ? todaysRecords : yesterdaysRecords).map((record, index) => (
+            {(activeHistoryTab === 'today' ? todaysRecords : yesterdaysRecords).map((record) => (
               <div key={record.id} className="flex justify-between items-center bg-gray-800 p-3 rounded-lg">
-                <span className="text-gray-400">
-                  {format(new Date(record.createdAt), 'HH:mm:ss')}
-                </span>
+                <div className="flex flex-col">
+                  <span className="text-gray-400">
+                    {format(new Date(record.createdAt), 'HH:mm:ss')}
+                  </span>
+                  {record.todoTitle && (
+                    <span className="text-sm text-gray-500">
+                      {record.todoTitle}
+                    </span>
+                  )}
+                </div>
                 <span className="text-blue-400 font-mono">
                   {formatTime(record.duration)}
                 </span>

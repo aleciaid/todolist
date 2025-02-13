@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Timer } from './components/Timer';
 import { TodoList } from './components/TodoList';
-import { X } from 'lucide-react';
+import { SettingsModal } from './components/SettingsModal';
+import { X, Settings, Upload } from 'lucide-react';
+import { db } from './db/TodoDB';
 
 function CustomCursor() {
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -75,6 +77,7 @@ function App() {
   const [userName, setUserName] = useState('');
   const [showNamePrompt, setShowNamePrompt] = useState(true);
   const [showEndDayModal, setShowEndDayModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   useEffect(() => {
     const savedName = localStorage.getItem('userName');
@@ -89,6 +92,33 @@ function App() {
     if (userName.trim()) {
       localStorage.setItem('userName', userName);
       setShowNamePrompt(false);
+    }
+  };
+
+  const handleImport = async (file: File) => {
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data.version || !data.userName || !data.todos || !data.timerRecords) {
+        throw new Error('Invalid backup file format');
+      }
+
+      // Clear existing data
+      await db.todos.where('userId').equals(data.userName).delete();
+      await db.timerRecords.where('userId').equals(data.userName).delete();
+      await db.activeTimer.clear();
+
+      // Import new data
+      await db.todos.bulkAdd(data.todos);
+      await db.timerRecords.bulkAdd(data.timerRecords);
+
+      // Set username and reload
+      localStorage.setItem('userName', data.userName);
+      window.location.reload();
+    } catch (error) {
+      console.error('Import failed:', error);
+      alert('Failed to import data. Please check the file format and try again.');
     }
   };
 
@@ -122,6 +152,21 @@ function App() {
               >
                 Mulai
               </button>
+              <div className="text-center">
+                <label className="text-blue-400 hover:text-blue-500 cursor-pointer flex items-center justify-center gap-2">
+                  <Upload className="w-4 h-4" />
+                  <span>Import Data</span>
+                  <input
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImport(file);
+                    }}
+                  />
+                </label>
+              </div>
             </form>
           </div>
         </div>
@@ -132,13 +177,21 @@ function App() {
               <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 text-transparent bg-clip-text">
                 Todo List & Timer
               </h1>
-              <button
-                onClick={() => setShowEndDayModal(true)}
-                className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
-              >
-                <X className="w-4 h-4" />
-                End Day
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSettingsModal(true)}
+                  className="bg-gray-800 hover:bg-gray-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setShowEndDayModal(true)}
+                  className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                  End Day
+                </button>
+              </div>
             </div>
             
             <div className="flex flex-col gap-8">
@@ -148,6 +201,12 @@ function App() {
           </div>
         </div>
       )}
+
+      <SettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        userName={userName}
+      />
     </>
   );
 }
