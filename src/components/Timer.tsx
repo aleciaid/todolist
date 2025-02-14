@@ -23,7 +23,6 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
         .equals(userName)
         .toArray();
       
-      // Sort records by createdAt in descending order
       return records.sort((a, b) => 
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
@@ -31,14 +30,34 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
     [userName]
   );
 
-  // Subscribe to active timer from any task
   const activeTimer = useLiveQuery(
-    () => db.activeTimer.toArray(),
-    []
+    () => db.activeTimer
+      .where('userId')
+      .equals(userName)
+      .first()
   );
 
-  const currentTime = activeTimer?.[0]?.time || 0;
-  const currentTask = activeTimer?.[0]?.todoTitle || '';
+  const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    if (activeTimer) {
+      const elapsedTime = Math.floor((Date.now() - activeTimer.startTime) / 1000);
+      setCurrentTime(elapsedTime);
+
+      const interval = setInterval(() => {
+        const newElapsedTime = Math.floor((Date.now() - activeTimer.startTime) / 1000);
+        setCurrentTime(newElapsedTime);
+        // Update the active timer in the database
+        db.activeTimer.update(activeTimer.id!, {
+          time: newElapsedTime
+        });
+      }, 1000);
+
+      return () => clearInterval(interval);
+    } else {
+      setCurrentTime(0);
+    }
+  }, [activeTimer]);
 
   const todaysTodos = useLiveQuery(
     () => db.todos
@@ -128,9 +147,9 @@ export function Timer({ userName, showEndDayModal, setShowEndDayModal }: TimerPr
           <div className="text-6xl font-mono text-center mb-4 text-blue-400">
             {formatTime(currentTime)}
           </div>
-          {currentTask && (
+          {activeTimer?.todoTitle && (
             <p className="text-center text-gray-400">
-              Current Task: {currentTask}
+              Current Task: {activeTimer.todoTitle}
             </p>
           )}
         </div>

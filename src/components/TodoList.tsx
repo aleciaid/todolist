@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/TodoDB';
 import { format, isEqual, startOfDay } from 'date-fns';
@@ -35,6 +35,7 @@ function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo, isAnyTimer
   const [editValue, setEditValue] = useState(todo.title);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [time, setTime] = useState(0);
+  const userId = localStorage.getItem('userName') || '';
   
   const {
     attributes,
@@ -57,52 +58,66 @@ function SortableTodoItem({ todo, toggleTodo, deleteTodo, updateTodo, isAnyTimer
     }
   };
 
-  React.useEffect(() => {
+  // Check if this todo has an active timer
+  const activeTimer = useLiveQuery(
+    () => db.activeTimer
+      .where('todoId')
+      .equals(todo.id || 0)
+      .first()
+  );
+
+  useEffect(() => {
+    if (activeTimer) {
+      setIsTimerRunning(true);
+      const elapsedTime = Math.floor((Date.now() - activeTimer.startTime) / 1000);
+      setTime(elapsedTime);
+    }
+  }, [activeTimer]);
+
+  useEffect(() => {
     let interval: number;
     if (isTimerRunning) {
       interval = setInterval(() => {
-        setTime(prevTime => {
-          const newTime = prevTime + 1;
+        if (activeTimer) {
+          const elapsedTime = Math.floor((Date.now() - activeTimer.startTime) / 1000);
+          setTime(elapsedTime);
           // Update the active timer in the database
-          db.activeTimer.clear().then(() => {
-            db.activeTimer.add({
-              time: newTime,
-              todoTitle: todo.title
-            });
+          db.activeTimer.update(activeTimer.id!, {
+            time: elapsedTime
           });
-          return newTime;
-        });
+        }
       }, 1000);
     }
-    return () => {
-      clearInterval(interval);
-      // Clear active timer when component unmounts or timer stops
-      if (!isTimerRunning) {
-        db.activeTimer.clear();
-      }
-    };
-  }, [isTimerRunning, todo.title]);
+    return () => clearInterval(interval);
+  }, [isTimerRunning, activeTimer]);
 
   const startTimer = async () => {
-    // Check if any other timer is running
-    if (!isAnyTimerRunning && !todo.completed) {
+    if (!isAnyTimerRunning && !todo.completed && todo.id) {
+      const startTime = Date.now();
+      await db.activeTimer.add({
+        time: 0,
+        todoTitle: todo.title,
+        startTime,
+        todoId: todo.id,
+        userId
+      });
       setIsTimerRunning(true);
     }
   };
 
   const stopTimer = async () => {
-    if (time > 0 && todo.id) {
+    if (activeTimer && todo.id) {
+      const elapsedTime = Math.floor((Date.now() - activeTimer.startTime) / 1000);
       await db.timerRecords.add({
-        duration: time,
+        duration: elapsedTime,
         createdAt: new Date(),
-        userId: todo.userId,
+        userId,
         todoId: todo.id,
         todoTitle: todo.title
       });
+      await db.activeTimer.delete(activeTimer.id!);
       setTime(0);
       setIsTimerRunning(false);
-      // Clear active timer
-      await db.activeTimer.clear();
     }
   };
 

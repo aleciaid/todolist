@@ -23,6 +23,9 @@ export interface ActiveTimer {
   id?: number;
   time: number;
   todoTitle: string;
+  startTime: number; // Timestamp when timer started
+  todoId: number;    // Reference to the todo
+  userId: string;    // User reference
 }
 
 export class TodoDB extends Dexie {
@@ -32,10 +35,10 @@ export class TodoDB extends Dexie {
 
   constructor() {
     super('TodoDB');
-    this.version(5).stores({
+    this.version(6).stores({
       todos: '++id, title, completed, createdAt, dueDate, order, userId',
       timerRecords: '++id, duration, createdAt, userId, todoId, todoTitle',
-      activeTimer: '++id, time, todoTitle'
+      activeTimer: '++id, time, todoTitle, startTime, todoId, userId'
     });
   }
 }
